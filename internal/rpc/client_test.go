@@ -2,10 +2,12 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestServer(t *testing.T, body []byte) *httptest.Server {
@@ -82,5 +84,54 @@ func TestChainID_InvalidResult(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestChainID_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	))
+	defer server.Close()
+	client := NewClient(server.URL)
+
+	_, err := client.ChainID(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected HTTP 500 error, got %v", err)
+	}
+
+}
+
+func TestChainID_ContextTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-time.After(100 * time.Millisecond):
+				// deliberately don't respond
+			case <-r.Context().Done():
+				return
+			}
+		},
+	))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		50*time.Millisecond,
+	)
+	defer cancel()
+	client := NewClient(server.URL)
+	_, err := client.ChainID(ctx)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
 	}
 }
