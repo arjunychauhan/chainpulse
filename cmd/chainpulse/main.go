@@ -18,7 +18,7 @@ func main() {
 		check(os.Args[2:])
 
 	case "version":
-		fmt.Println("ChainPulse v0.1.0")
+		fmt.Println("ChainPulse v0.2.0")
 
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
