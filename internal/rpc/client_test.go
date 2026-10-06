@@ -37,9 +37,13 @@ func TestChainID(t *testing.T) {
 	defer server.Close()
 	client := NewClient(server.URL)
 
-	chainID, err := client.ChainID(context.Background())
+	chainID, latency, err := client.ChainID(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if latency <= 0 {
+		t.Fatalf("expected latency  > 0, got %v", latency)
 	}
 
 	if chainID != 8453 {
@@ -60,7 +64,7 @@ func TestChainID_RPCError(t *testing.T) {
 	defer server.Close()
 	client := NewClient(server.URL)
 
-	_, err := client.ChainID(context.Background())
+	_, _, err := client.ChainID(context.Background())
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -80,7 +84,7 @@ func TestChainID_InvalidResult(t *testing.T) {
 	defer server.Close()
 	client := NewClient(server.URL)
 
-	_, err := client.ChainID(context.Background())
+	_, _, err := client.ChainID(context.Background())
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -96,7 +100,7 @@ func TestChainID_HTTPError(t *testing.T) {
 	defer server.Close()
 	client := NewClient(server.URL)
 
-	_, err := client.ChainID(context.Background())
+	_, _, err := client.ChainID(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -120,13 +124,21 @@ func TestChainID_ContextTimeout(t *testing.T) {
 	))
 	defer server.Close()
 
+	// The timeout applies to the entire health check,
+	// not to each individual RPC request.
+
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
 		50*time.Millisecond,
 	)
 	defer cancel()
 	client := NewClient(server.URL)
-	_, err := client.ChainID(ctx)
+	_, latency, err := client.ChainID(ctx)
+
+	if latency <= 0 {
+		t.Fatalf("expected latency > 0, got %v", latency)
+	}
+
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
