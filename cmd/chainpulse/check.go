@@ -43,19 +43,22 @@ func check(args []string) {
 	)
 	defer cancel()
 
-	chainID, err := rpcClient.ChainID(ctx)
+	chainID, chainLatency, err := rpcClient.ChainID(ctx)
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("Error:", err, "chainLatency", chainLatency)
 		os.Exit(1)
 	}
 
 	fmt.Println("Chain ID:", chainID)
+	fmt.Println("Chain ID Latency:", chainLatency)
 
-	blockNumber, err := rpcClient.BlockNumber(ctx)
+	blockNumber, blockLatency, err := rpcClient.BlockNumber(ctx)
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("Error:", err, "blockLatency", blockLatency)
 		os.Exit(1)
 	}
 	fmt.Println("Block Number:", blockNumber)
+	fmt.Println("Block Number Latency:", blockLatency)
 	fmt.Println("RPC:", *rpcURL)
+	fmt.Println("Total RPC Latency", chainLatency+blockLatency)
 }

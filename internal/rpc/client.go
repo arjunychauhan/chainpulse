@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type Client struct {
@@ -79,44 +80,56 @@ func (c *Client) Call(ctx context.Context, method string) ([]byte, error) {
 	return body, nil
 }
 
-func (c *Client) callUint64(ctx context.Context, method string) (uint64, error) {
+func (c *Client) call(ctx context.Context, method string) (json.RawMessage, time.Duration, error) {
+	start := time.Now()
 	data, err := c.Call(ctx, method)
+	latency := time.Since(start)
 
 	if err != nil {
-		return 0, err
+		return nil, latency, err
 	}
+
 	var response RPCResponse
 	err = json.Unmarshal(data, &response)
 
 	if err != nil {
-		return 0, err
+		return nil, latency, err
 	}
 
 	if response.Error != nil {
-		return 0, fmt.Errorf("RPC error: %s", response.Error.Message)
+		return nil, latency, fmt.Errorf("RPC error: %s", response.Error.Message)
 	}
 
-	var resultHex string
-
-	err = json.Unmarshal(response.Result, &resultHex)
-	if err != nil {
-		return 0, err
-	}
-
-	result, err := strconv.ParseUint(resultHex, 0, 64)
-
-	if err != nil {
-		return 0, err
-	}
-
-	return result, nil
+	return response.Result, latency, nil
 }
 
-func (c *Client) ChainID(ctx context.Context) (uint64, error) {
+func (c *Client) callUint64(ctx context.Context, method string) (result uint64, latency time.Duration, err error) {
+	data, latency, err := c.call(ctx, method)
+
+	if err != nil {
+		return 0, latency, err
+	}
+	var resultHex string
+
+	err = json.Unmarshal(data, &resultHex)
+	if err != nil {
+		return
+	}
+
+	result, err = strconv.ParseUint(resultHex, 0, 64)
+
+	if err != nil {
+		return
+	}
+
+	return
+}
+
+func (c *Client) ChainID(ctx context.Context) (uint64, time.Duration, error) {
 	return c.callUint64(ctx, "eth_chainId")
 }
 
-func (c *Client) BlockNumber(ctx context.Context) (uint64, error) {
+func (c *Client) BlockNumber(ctx context.Context) (uint64, time.Duration, error) {
 	return c.callUint64(ctx, "eth_blockNumber")
 
 }
