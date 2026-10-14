@@ -4,19 +4,160 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os"
 	"time"
 
+	"github.com/arjunychauhan/chainpulse/internal/config"
 	client "github.com/arjunychauhan/chainpulse/internal/rpc"
 )
 
-func check(args []string) {
+type SuccessResult struct {
+	RPCName        string
+	ChainID        uint64
+	BlockNumber    uint64
+	ChainIDLatency time.Duration
+	BlockLatency   time.Duration
+	TotalLatency   time.Duration
+}
+
+type FailedResult struct {
+	RPCName string
+	Error   error
+}
+
+type RPCResult struct {
+	Success *SuccessResult
+	Failed  *FailedResult
+}
+type RPCCheckResult struct {
+	Index  int
+	Result *RPCResult
+}
+type RPCCheckFunc func(
+	rpcURL string,
+	timeout time.Duration,
+	name string,
+) (*SuccessResult, error)
+
+func check(args []string) int {
+	return checkWithRPC(args, callRPCClient)
+}
+
+func callRPCClient(rpcURL string, timeout time.Duration, name string) (*SuccessResult, error) {
+	rpcClient := client.NewClient(rpcURL)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		timeout,
+	)
+	defer cancel()
+
+	chainID, chainLatency, err := rpcClient.ChainID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	blockNumber, blockLatency, err := rpcClient.BlockNumber(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	data := &SuccessResult{
+		ChainID:        chainID,
+		BlockNumber:    blockNumber,
+		BlockLatency:   blockLatency,
+		ChainIDLatency: chainLatency,
+		TotalLatency:   blockLatency + chainLatency,
+		RPCName:        name,
+	}
+	return data, nil
+}
+
+func printRPCResult(result *RPCResult, resultLag *LagResult) {
+	if result.Failed != nil {
+		printFailedResult(result.Failed)
+		return
+	}
+
+	if result.Success != nil && resultLag != nil {
+		printSuccessResult(result.Success, resultLag)
+	}
+}
+
+func printSuccessResult(data *SuccessResult, resultLag *LagResult) {
+	fmt.Println("RPC: ", data.RPCName)
+	fmt.Println("Chain ID: ", data.ChainID)
+	fmt.Println("Block Number: ", data.BlockNumber)
+	fmt.Println("Chain Latency: ", data.ChainIDLatency)
+	fmt.Println("Block Latency: ", data.BlockLatency)
+	fmt.Println("Total Latency: ", data.TotalLatency)
+	if resultLag != nil {
+		fmt.Println("Lag:", resultLag.Lag)
+		fmt.Println("Status:", resultLag.Status)
+	}
+	fmt.Println("------------------------------------------")
+}
+
+func printFailedResult(result *FailedResult) {
+	fmt.Println("RPC:", result.RPCName)
+	fmt.Println("Status: FAILED")
+	fmt.Println("Error:", result.Error)
+	fmt.Println("------------------------------------------")
+}
+
+func checkRPCs(
+	rpcs []config.RPCConfig,
+	timeout time.Duration,
+	checkRPC RPCCheckFunc,
+) ([]*RPCResult, error) {
+	resultsChan := make(chan RPCCheckResult, len(rpcs))
+
+	for i, rpc := range rpcs {
+		go func(i int, rpc config.RPCConfig) {
+			data, err := checkRPC(rpc.URL, timeout, rpc.Name)
+
+			if err != nil {
+				resultsChan <- RPCCheckResult{
+					Index: i,
+					Result: &RPCResult{
+						Failed: &FailedResult{
+							RPCName: rpc.Name,
+							Error:   err,
+						},
+					},
+				}
+				return
+			}
+
+			resultsChan <- RPCCheckResult{
+				Index: i,
+				Result: &RPCResult{
+					Success: data,
+				},
+			}
+		}(i, rpc)
+
+	}
+	results := make([]*RPCResult, len(rpcs))
+
+	for i := 0; i < len(rpcs); i++ {
+		result := <-resultsChan
+		results[result.Index] = result.Result
+	}
+	return results, nil
+}
+
+func checkWithRPC(args []string, checkRPC RPCCheckFunc) int {
 	checkCmd := flag.NewFlagSet("check", flag.ExitOnError)
 
 	rpcURL := checkCmd.String(
 		"rpc",
 		"",
 		"EVM JSON-RPC endpoint",
+	)
+	configPath := checkCmd.String(
+		"config",
+		"",
+		"Path to ChainPulse config file",
 	)
 	timeout := checkCmd.Duration(
 		"timeout",
@@ -26,39 +167,63 @@ func check(args []string) {
 
 	checkCmd.Parse(args)
 
-	if *rpcURL == "" {
-		fmt.Println("Error: --rpc is required")
-		os.Exit(1)
+	if *rpcURL == "" && *configPath == "" {
+		fmt.Println("Error: --rpc  or --config is required")
+		return 1
 	}
+	if *rpcURL != "" && *configPath != "" {
+		fmt.Println("Error: --rpc  or --config only one is required")
+		return 1
+	}
+
+	if *configPath != "" {
+		cfg, err := config.Load(*configPath)
+		if err != nil {
+			fmt.Println("Error loading config:", err)
+			return 1
+		}
+		results, err := checkRPCs(cfg.RPCs, cfg.Timeout, checkRPC)
+		if err != nil {
+			fmt.Println("Error:", err)
+			return 1
+		}
+		resultLags := analyzeLag(results, cfg.BlockLagThreshold)
+		lagIndex := 0
+
+		for _, result := range results {
+			if result.Failed != nil {
+				printRPCResult(result, nil)
+				continue
+			}
+
+			printRPCResult(result, &resultLags[lagIndex])
+			lagIndex++
+		}
+
+		if hasUnhealthyRPCs(results, cfg.BlockLagThreshold) {
+			return 1
+		}
+		return 0
+	}
+
 	if *timeout <= 0 {
 		fmt.Println("Error: --timeout must be greater than zero")
-		os.Exit(1)
+		return 1
 	}
 
-	rpcClient := client.NewClient(*rpcURL)
+	if *rpcURL != "" {
+		data, err := callRPCClient(*rpcURL, *timeout, "No name")
+		if err != nil {
+			result := &FailedResult{
+				RPCName: "No name",
+				Error:   err,
+			}
 
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		*timeout,
-	)
-	defer cancel()
-
-	chainID, chainLatency, err := rpcClient.ChainID(ctx)
-	if err != nil {
-		fmt.Println("Error:", err, "chainLatency", chainLatency)
-		os.Exit(1)
+			printFailedResult(result)
+			return 1
+		}
+		printSuccessResult(data, nil)
 	}
 
-	fmt.Println("Chain ID:", chainID)
-	fmt.Println("Chain ID Latency:", chainLatency)
-
-	blockNumber, blockLatency, err := rpcClient.BlockNumber(ctx)
-	if err != nil {
-		fmt.Println("Error:", err, "blockLatency", blockLatency)
-		os.Exit(1)
-	}
-	fmt.Println("Block Number:", blockNumber)
-	fmt.Println("Block Number Latency:", blockLatency)
-	fmt.Println("RPC:", *rpcURL)
-	fmt.Println("Total RPC Latency", chainLatency+blockLatency)
+	return 0
 }
