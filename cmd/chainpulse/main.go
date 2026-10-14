@@ -15,10 +15,10 @@ func main() {
 
 	switch command {
 	case "check":
-		check(os.Args[2:])
+		os.Exit(check(os.Args[2:]))
 
 	case "version":
-		fmt.Println("ChainPulse v0.2.0")
+		fmt.Println("ChainPulse v0.3.0")
 
 	default:
 		fmt.Printf("Unknown command: %s\n", command)

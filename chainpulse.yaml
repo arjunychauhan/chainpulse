@@ -1,0 +1,9 @@
+timeout: 5s
+block_lag_threshold: 3
+
+rpcs:
+  - name: ethereum
+    url: https://eth.rpc.blxrbdn.com
+
+  - name: ethereum-backup
+    url: https://ethereum-rpc.publicnode.com

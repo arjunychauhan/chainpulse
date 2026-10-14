@@ -1,6 +1,6 @@
 # Go binaries
 *.exe
-chainpulse
+/chainpulse
 
 # Build output
 /bin/
