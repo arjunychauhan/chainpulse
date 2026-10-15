@@ -22,24 +22,52 @@ ChainPulse checks RPC availability, chain IDs, block heights, response latency, 
 
 ## Installation
 
-Clone the repository:
+### Option 1: Download a prebuilt binary (recommended)
+
+Download the archive for your operating system and architecture from the [ChainPulse v0.4.0 release page](https://github.com/arjunychauhan/chainpulse/releases/tag/v0.4.0).
+
+| Platform            | Download                                |
+| ------------------- | --------------------------------------- |
+| Linux x86-64        | `chainpulse_v0.4.0_linux_amd64.tar.gz`  |
+| Linux ARM64         | `chainpulse_v0.4.0_linux_arm64.tar.gz`  |
+| macOS Intel         | `chainpulse_v0.4.0_darwin_amd64.tar.gz` |
+| macOS Apple Silicon | `chainpulse_v0.4.0_darwin_arm64.tar.gz` |
+| Windows x86-64      | `chainpulse_v0.4.0_windows_amd64.zip`   |
+
+Download `SHA256SUMS` from the same release to verify the archive's integrity.
+
+For example, on macOS Apple Silicon:
+
+```bash
+curl -fLO https://github.com/arjunychauhan/chainpulse/releases/download/v0.4.0/chainpulse_v0.4.0_darwin_arm64.tar.gz
+curl -fLO https://github.com/arjunychauhan/chainpulse/releases/download/v0.4.0/SHA256SUMS
+
+grep 'chainpulse_v0.4.0_darwin_arm64.tar.gz' SHA256SUMS \
+  | shasum -a 256 -c -
+
+tar -xzf chainpulse_v0.4.0_darwin_arm64.tar.gz
+chmod +x chainpulse
+./chainpulse version
+```
+
+Expected output:
+
+```text
+ChainPulse v0.4.0
+```
+
+### Option 2: Build from source
+
+Requirements: Go 1.27.1 or a compatible toolchain for the version declared in `go.mod`.
 
 ```bash
 git clone https://github.com/arjunychauhan/chainpulse.git
 cd chainpulse
-```
-
-Run the CLI directly:
-
-```bash
-go run ./cmd/chainpulse version
-```
-
-Build the executable:
-
-```bash
 go build -o chainpulse ./cmd/chainpulse
+./chainpulse version
 ```
+
+A locally built executable reports `ChainPulse dev` unless a version is injected through linker flags.
 
 ## Usage
 
@@ -207,7 +235,7 @@ chainpulse/
 - [ ] Webhook alerts
 - [ ] REST API
 - [ ] Docker support
-- [ ] Production release binaries
+- [x] Production release binaries
 
 ## Why ChainPulse?
 
