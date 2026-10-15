@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: chainpulse <command>")
@@ -18,7 +20,7 @@ func main() {
 		os.Exit(check(os.Args[2:]))
 
 	case "version":
-		fmt.Println("ChainPulse v0.3.0")
+		fmt.Printf("ChainPulse %s\n", version)
 
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
