@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/arjunychauhan/chainpulse/internal/config"
@@ -147,7 +149,17 @@ func checkRPCs(
 }
 
 func checkWithRPC(args []string, checkRPC RPCCheckFunc) int {
-	checkCmd := flag.NewFlagSet("check", flag.ExitOnError)
+	checkCmd := flag.NewFlagSet("check", flag.ContinueOnError)
+	checkCmd.Usage = func() {
+		fmt.Fprintln(os.Stdout, `Usage:
+  chainpulse check --rpc <URL> [--timeout 10s]
+  chainpulse check --config <file>
+
+Options:`)
+		checkCmd.PrintDefaults()
+	}
+
+	checkCmd.SetOutput(io.Discard)
 
 	rpcURL := checkCmd.String(
 		"rpc",
@@ -159,13 +171,28 @@ func checkWithRPC(args []string, checkRPC RPCCheckFunc) int {
 		"",
 		"Path to ChainPulse config file",
 	)
+
 	timeout := checkCmd.Duration(
 		"timeout",
 		10*time.Second,
 		"RPC request timeout",
 	)
 
-	checkCmd.Parse(args)
+	// Handle help before parsing the flags.
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			checkCmd.Usage()
+			return 0
+		}
+	}
+
+	if err := checkCmd.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
+		return 1
+	}
 
 	if *rpcURL == "" && *configPath == "" {
 		fmt.Println("Error: --rpc  or --config is required")
