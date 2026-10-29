@@ -30,10 +30,12 @@ type RPCResult struct {
 	Success *SuccessResult
 	Failed  *FailedResult
 }
+
 type RPCCheckResult struct {
 	Index  int
 	Result *RPCResult
 }
+
 type RPCCheckFunc func(
 	rpcURL string,
 	timeout time.Duration,
@@ -47,10 +49,7 @@ func check(args []string) int {
 func callRPCClient(rpcURL string, timeout time.Duration, name string) (*SuccessResult, error) {
 	rpcClient := client.NewClient(rpcURL)
 
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		timeout,
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	chainID, chainLatency, err := rpcClient.ChainID(ctx)
@@ -63,15 +62,14 @@ func callRPCClient(rpcURL string, timeout time.Duration, name string) (*SuccessR
 		return nil, err
 	}
 
-	data := &SuccessResult{
+	return &SuccessResult{
 		ChainID:        chainID,
 		BlockNumber:    blockNumber,
 		BlockLatency:   blockLatency,
 		ChainIDLatency: chainLatency,
 		TotalLatency:   blockLatency + chainLatency,
 		RPCName:        name,
-	}
-	return data, nil
+	}, nil
 }
 
 func printRPCResult(result *RPCResult, resultLag *LagResult) {
@@ -92,10 +90,12 @@ func printSuccessResult(data *SuccessResult, resultLag *LagResult) {
 	fmt.Println("Chain Latency: ", data.ChainIDLatency)
 	fmt.Println("Block Latency: ", data.BlockLatency)
 	fmt.Println("Total Latency: ", data.TotalLatency)
+
 	if resultLag != nil {
 		fmt.Println("Lag:", resultLag.Lag)
 		fmt.Println("Status:", resultLag.Status)
 	}
+
 	fmt.Println("------------------------------------------")
 }
 
@@ -137,28 +137,23 @@ func checkRPCs(
 				},
 			}
 		}(i, rpc)
-
 	}
+
 	results := make([]*RPCResult, len(rpcs))
 
 	for i := 0; i < len(rpcs); i++ {
 		result := <-resultsChan
 		results[result.Index] = result.Result
 	}
+
 	return results, nil
 }
 
 func checkWithRPC(args []string, checkRPC RPCCheckFunc) int {
 	checkCmd := flag.NewFlagSet("check", flag.ContinueOnError)
-	checkCmd.Usage = func() {
-		fmt.Fprintln(os.Stdout, `Usage:
-  chainpulse check --rpc <URL> [--timeout 10s]
-  chainpulse check --config <file>
 
-Options:`)
-		checkCmd.PrintDefaults()
-	}
-
+	// Suppress the flag package's automatic error and usage output.
+	// We handle help and parsing errors explicitly below.
 	checkCmd.SetOutput(io.Discard)
 
 	rpcURL := checkCmd.String(
@@ -171,14 +166,39 @@ Options:`)
 		"",
 		"Path to ChainPulse config file",
 	)
-
 	timeout := checkCmd.Duration(
 		"timeout",
 		10*time.Second,
 		"RPC request timeout",
 	)
 
-	// Handle help before parsing the flags.
+	checkCmd.Usage = func() {
+		for _, arg := range args {
+			if arg == "--help" || arg == "-h" {
+				fmt.Fprintln(os.Stdout, `Usage:
+  chainpulse check --rpc <URL> [--timeout 10s]
+  chainpulse check --config <file>
+
+Options:`)
+
+				checkCmd.VisitAll(func(f *flag.Flag) {
+					valueType := "string"
+					if f.Name == "timeout" {
+						valueType = "duration"
+					}
+
+					fmt.Fprintf(os.Stdout, "  -%s %s\n        %s", f.Name, valueType, f.Usage)
+					if f.Name == "timeout" {
+						fmt.Fprintf(os.Stdout, " (default %s)", f.DefValue)
+					}
+					fmt.Fprintln(os.Stdout)
+				})
+				return
+			}
+		}
+	}
+
+	// Handle help before parsing, so Usage is called exactly once.
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
 			checkCmd.Usage()
@@ -187,33 +207,33 @@ Options:`)
 	}
 
 	if err := checkCmd.Parse(args); err != nil {
-		if err == flag.ErrHelp {
-			return 0
-		}
 		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
 		return 1
 	}
 
 	if *rpcURL == "" && *configPath == "" {
-		fmt.Println("Error: --rpc  or --config is required")
+		fmt.Fprintln(os.Stderr, "Error: --rpc or --config is required")
 		return 1
 	}
+
 	if *rpcURL != "" && *configPath != "" {
-		fmt.Println("Error: --rpc  or --config only one is required")
+		fmt.Fprintln(os.Stderr, "Error: --rpc and --config cannot be used together")
 		return 1
 	}
 
 	if *configPath != "" {
 		cfg, err := config.Load(*configPath)
 		if err != nil {
-			fmt.Println("Error loading config:", err)
+			fmt.Fprintln(os.Stderr, "Error loading config:", err)
 			return 1
 		}
+
 		results, err := checkRPCs(cfg.RPCs, cfg.Timeout, checkRPC)
 		if err != nil {
-			fmt.Println("Error:", err)
+			fmt.Fprintln(os.Stderr, "Error:", err)
 			return 1
 		}
+
 		resultLags := analyzeLag(results, cfg.BlockLagThreshold)
 		lagIndex := 0
 
@@ -230,25 +250,25 @@ Options:`)
 		if hasUnhealthyRPCs(results, cfg.BlockLagThreshold) {
 			return 1
 		}
+
 		return 0
 	}
 
 	if *timeout <= 0 {
-		fmt.Println("Error: --timeout must be greater than zero")
+		fmt.Fprintln(os.Stderr, "Error: --timeout must be greater than zero")
 		return 1
 	}
 
 	if *rpcURL != "" {
-		data, err := callRPCClient(*rpcURL, *timeout, "No name")
+		data, err := checkRPC(*rpcURL, *timeout, "No name")
 		if err != nil {
-			result := &FailedResult{
+			printFailedResult(&FailedResult{
 				RPCName: "No name",
 				Error:   err,
-			}
-
-			printFailedResult(result)
+			})
 			return 1
 		}
+
 		printSuccessResult(data, nil)
 	}
 
